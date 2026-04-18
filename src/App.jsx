@@ -1,4 +1,15 @@
 import { useState, useEffect } from "react";
+import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
+
+// ── Replace with your Google OAuth Client ID from console.cloud.google.com ──
+const GOOGLE_CLIENT_ID = "691348670246-632t40dg8rr5a9rh6c4tfi7p34s8mdtc.apps.googleusercontent.com";
+
+function parseJwt(token) {
+  try {
+    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(window.atob(base64));
+  } catch { return null; }
+}
 import {
   LayoutDashboard, Users, Mail, BarChart2, Settings, Bell, Search,
   Plus, ChevronRight, ChevronDown, MoreHorizontal, Play, Pause,
@@ -728,6 +739,21 @@ function LoginPage({ onLogin, onGoSignup, onGoForgot }) {
     }, 700);
   }
 
+  function handleGoogleSuccess(credentialResponse) {
+    const payload = parseJwt(credentialResponse.credential);
+    if (!payload) { setError("Google sign-in failed. Please try again."); return; }
+    const session = {
+      name: payload.name,
+      email: payload.email,
+      avatar: payload.name?.[0]?.toUpperCase() || "G",
+      picture: payload.picture,
+      plan: "Pro",
+      provider: "google",
+    };
+    saveSession(session);
+    onLogin(session);
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -750,12 +776,31 @@ function LoginPage({ onLogin, onGoSignup, onGoForgot }) {
             </div>
           )}
 
+          {/* Google Sign-In */}
+          <div className="flex justify-center mb-4">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError("Google sign-in failed. Please try again.")}
+              width="368"
+              text="signin_with"
+              shape="rectangular"
+              logo_alignment="center"
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-xs text-slate-400 font-medium">or continue with email</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
               <input
                 type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="you@company.com" autoFocus
+                placeholder="you@company.com"
                 className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
@@ -829,6 +874,21 @@ function SignupPage({ onLogin, onGoLogin }) {
     }, 700);
   }
 
+  function handleGoogleSuccess(credentialResponse) {
+    const payload = parseJwt(credentialResponse.credential);
+    if (!payload) { setError("Google sign-up failed. Please try again."); return; }
+    const session = {
+      name: payload.name,
+      email: payload.email,
+      avatar: payload.name?.[0]?.toUpperCase() || "G",
+      picture: payload.picture,
+      plan: "Pro Trial",
+      provider: "google",
+    };
+    saveSession(session);
+    onLogin(session);
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -849,11 +909,30 @@ function SignupPage({ onLogin, onGoLogin }) {
             </div>
           )}
 
+          {/* Google Sign-Up */}
+          <div className="flex justify-center mb-4">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError("Google sign-up failed. Please try again.")}
+              width="368"
+              text="signup_with"
+              shape="rectangular"
+              logo_alignment="center"
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex-1 h-px bg-slate-200" />
+            <span className="text-xs text-slate-400 font-medium">or sign up with email</span>
+            <div className="flex-1 h-px bg-slate-200" />
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Full name</label>
               <input type="text" value={name} onChange={e => setName(e.target.value)}
-                placeholder="Basar Kucuk" autoFocus
+                placeholder="Basar Kucuk"
                 className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
             </div>
             <div>
@@ -4483,7 +4562,7 @@ function CompaniesPage() {
 }
 
 // ─── App Root ─────────────────────────────────────────────────────────────────
-export default function App() {
+function AppInner() {
   const [page, setPage] = useState("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [authScreen, setAuthScreen] = useState("login"); // "login" | "signup" | "forgot"
@@ -4543,5 +4622,13 @@ export default function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <AppInner />
+    </GoogleOAuthProvider>
   );
 }
