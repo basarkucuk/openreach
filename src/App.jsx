@@ -10,7 +10,7 @@ import {
   Tag, StickyNote, Calendar, MapPin, Building2, ExternalLink,
   ChevronUp, GripVertical, Circle, CheckSquare, PlusCircle,
   Layers, Globe, Linkedin, Twitter, User, AtSign, Hash,
-  ArrowUpRight, BarChart, Percent, TrendingDown, FolderOpen,
+  ArrowUpRight, BarChart as BarChartIcon, Percent, TrendingDown, FolderOpen,
   Contact, UsersRound, Network, Handshake,
   ThumbsUp, Mic, MessageCircle, Heart, GitBranch, Award,
   Webhook, MoveRight, MousePointerClick, Volume2, FlaskConical,
