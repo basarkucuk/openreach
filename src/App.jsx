@@ -1,5 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
+import { useLeads, useContacts, useCampaigns, useDeals, sendEmail } from "./supabase.js";
+
+// ─── User Context (makes logged-in user available to all pages) ───────────────
+const UserContext = createContext(null);
+const useUser = () => useContext(UserContext);
 
 // ── Replace with your Google OAuth Client ID from console.cloud.google.com ──
 const GOOGLE_CLIENT_ID = "691348670246-632t40dg8rr5a9rh6c4tfi7p34s8mdtc.apps.googleusercontent.com";
@@ -2184,19 +2189,24 @@ function EmailTemplatesPage() {
 
 // ─── Campaigns Page ──────────────────────────────────────────────────────────
 function CampaignsPage() {
+  const user = useUser();
+  const { campaigns, loading, addCampaign, updateCampaign, deleteCampaign } = useCampaigns(user?.email);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
   const [showNewModal, setShowNewModal]         = useState(false);
-  const [channelTab, setChannelTab]             = useState("all");  // all|linkedin|email|multichannel
-  const [subTab, setSubTab]                     = useState("campaigns"); // campaigns|templates
+  const [channelTab, setChannelTab]             = useState("all");
+  const [subTab, setSubTab]                     = useState("campaigns");
 
-  const handleCreate = (channel) => {
+  const handleCreate = async (channel) => {
     setShowNewModal(false);
-    setSelectedCampaign({ channel, id: "new", name: "New Campaign" });
+    const { data } = await addCampaign({
+      name: "New Campaign", channel, status: "draft", steps: 1,
+      leads_count: 0, accepted: 0, replied: 0,
+    });
+    if (data) setSelectedCampaign(data);
   };
 
   if (selectedCampaign !== null) {
-    const camp = selectedCampaign === "new" ? null
-      : typeof selectedCampaign === "object" ? selectedCampaign
+    const camp = typeof selectedCampaign === "object" ? selectedCampaign
       : campaigns.find(c => c.id === selectedCampaign);
     return <CampaignBuilder campaign={camp} onBack={() => setSelectedCampaign(null)} />;
   }
@@ -2243,6 +2253,18 @@ function CampaignsPage() {
             ))}
           </div>
 
+          {loading && campaigns.length === 0 && (
+            <div className="flex items-center justify-center py-20 text-slate-400 text-sm">
+              <RefreshCw size={16} className="animate-spin mr-2" /> Loading campaigns…
+            </div>
+          )}
+          {!loading && campaigns.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+              <Zap size={36} className="mb-3 opacity-30" />
+              <p className="font-medium">No campaigns yet</p>
+              <p className="text-sm mt-1">Click "New Campaign" to create your first one</p>
+            </div>
+          )}
           <div className="grid gap-4">
             {filteredCampaigns.map(c => {
               const isEmail = c.channel === "email";
@@ -2262,11 +2284,10 @@ function CampaignsPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {c.status === "active"  && <button className="p-2 rounded-lg hover:bg-slate-100 text-amber-500"><Pause size={15} /></button>}
-                      {c.status === "paused"  && <button className="p-2 rounded-lg hover:bg-slate-100 text-emerald-500"><Play size={15} /></button>}
-                      <button onClick={() => setSelectedCampaign(c.id)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><Edit3 size={15} /></button>
-                      <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><Copy size={15} /></button>
-                      <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><MoreHorizontal size={15} /></button>
+                      {c.status === "active"  && <button onClick={() => updateCampaign(c.id, { status: "paused" })} className="p-2 rounded-lg hover:bg-slate-100 text-amber-500"><Pause size={15} /></button>}
+                      {c.status === "paused"  && <button onClick={() => updateCampaign(c.id, { status: "active" })} className="p-2 rounded-lg hover:bg-slate-100 text-emerald-500"><Play size={15} /></button>}
+                      <button onClick={() => setSelectedCampaign(c)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><Edit3 size={15} /></button>
+                      <button onClick={() => { if (window.confirm("Delete this campaign?")) deleteCampaign(c.id); }} className="p-2 rounded-lg hover:bg-slate-100 text-red-400"><Trash2 size={15} /></button>
                     </div>
                   </div>
 
@@ -2358,15 +2379,66 @@ function CampaignsPage() {
 }
 
 // ─── Leads Page ──────────────────────────────────────────────────────────────
+function AddLeadModal({ onClose, onAdd }) {
+  const [form, setForm] = useState({ name: "", title: "", company: "", email: "", linkedin: "", location: "", status: "pending" });
+  const [loading, setLoading] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name) return;
+    setLoading(true);
+    await onAdd(form);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+          <h2 className="font-bold text-slate-900">Add Lead</h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-3">
+          {[["Full name *", "name", "text"], ["Job title", "title", "text"], ["Company", "company", "text"], ["Email", "email", "email"], ["LinkedIn URL", "linkedin", "url"], ["Location", "location", "text"]].map(([label, key, type]) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+              <input type={type} value={form[key]} onChange={e => set(key, e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          ))}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+            <select value={form.status} onChange={e => set("status", e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {["pending","accepted","replied","rejected"].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={loading || !form.name}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />} Add Lead
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function LeadsPage() {
+  const user = useUser();
+  const { leads, loading, addLead, deleteLead, deleteLeads } = useLeads(user?.email);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedLeads, setSelectedLeads] = useState([]);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const filtered = leads.filter(l => {
-    const matchSearch = l.name.toLowerCase().includes(search.toLowerCase()) ||
-      l.company.toLowerCase().includes(search.toLowerCase()) ||
-      l.title.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = (l.name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (l.company || "").toLowerCase().includes(search.toLowerCase()) ||
+      (l.title || "").toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "all" || l.status === statusFilter;
     return matchSearch && matchStatus;
   });
@@ -2397,19 +2469,14 @@ function LeadsPage() {
         </select>
         {selectedLeads.length > 0 && (
           <div className="flex gap-2 ml-2">
-            <button className="flex items-center gap-1.5 px-3 py-2 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100">
-              <Zap size={14} /> Add to Campaign
-            </button>
-            <button className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
+            <button onClick={async () => { await deleteLeads(selectedLeads); setSelectedLeads([]); }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100">
               <Trash2 size={14} /> Delete ({selectedLeads.length})
             </button>
           </div>
         )}
         <div className="ml-auto flex gap-2">
-          <button className="flex items-center gap-2 px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
-            <Upload size={14} /> Import CSV
-          </button>
-          <button className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
             <Plus size={14} /> Add Lead
           </button>
         </div>
@@ -2465,14 +2532,22 @@ function LeadsPage() {
         </table>
         <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
           <p className="text-xs text-slate-400">{filtered.length} of {leads.length} leads</p>
-          <div className="flex gap-1">
-            <button className="px-2 py-1 text-xs rounded border border-slate-200 text-slate-400">Previous</button>
-            <button className="px-2 py-1 text-xs rounded border border-blue-500 bg-blue-50 text-blue-600">1</button>
-            <button className="px-2 py-1 text-xs rounded border border-slate-200 text-slate-400">Next</button>
-          </div>
         </div>
       </div>
+      {loading && leads.length === 0 && (
+        <div className="flex items-center justify-center py-20 text-slate-400 text-sm">
+          <RefreshCw size={16} className="animate-spin mr-2" /> Loading leads…
+        </div>
+      )}
+      {!loading && leads.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+          <Users size={36} className="mb-3 opacity-30" />
+          <p className="font-medium">No leads yet</p>
+          <p className="text-sm mt-1">Click "Add Lead" to get started</p>
+        </div>
+      )}
     </div>
+    {showAddModal && <AddLeadModal onClose={() => setShowAddModal(false)} onAdd={addLead} />}
   );
 }
 
@@ -3566,24 +3641,79 @@ function DealCard({ deal, onClick }) {
 }
 
 // ─── CRM Page ─────────────────────────────────────────────────────────────────
+function AddDealModal({ onClose, onAdd }) {
+  const [form, setForm] = useState({ name: "", company: "", title: "", email: "", phone: "", value: "", stage: "lead", notes: "" });
+  const [loading, setLoading] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name) return;
+    setLoading(true);
+    await onAdd({ ...form, value: parseFloat(form.value) || 0 });
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+          <h2 className="font-bold text-slate-900">Add Deal</h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-3">
+          {[["Contact name *", "name", "text"], ["Company", "company", "text"], ["Title", "title", "text"], ["Email", "email", "email"], ["Phone", "phone", "tel"], ["Deal value ($)", "value", "number"]].map(([label, key, type]) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+              <input type={type} value={form[key]} onChange={e => set(key, e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          ))}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Stage</label>
+            <select value={form.stage} onChange={e => set("stage", e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {["lead","qualified","proposal","negotiation","won","lost"].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+            <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={loading || !form.name}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />} Add Deal
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function CRMPage() {
-  const [deals, setDeals] = useState(crmDeals);
+  const user = useUser();
+  const { deals, loading, addDeal, updateDeal: updateDealDb, deleteDeal } = useDeals(user?.email);
   const [selectedDeal, setSelectedDeal] = useState(null);
-  const [view, setView] = useState("kanban"); // "kanban" | "list"
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [view, setView] = useState("kanban");
   const [search, setSearch] = useState("");
 
-  const updateDeal = (id, changes) => {
-    setDeals(prev => prev.map(d => d.id === id ? { ...d, ...changes } : d));
+  const updateDeal = async (id, changes) => {
+    await updateDealDb(id, changes);
     if (selectedDeal?.id === id) setSelectedDeal(prev => ({ ...prev, ...changes }));
   };
 
   const filtered = deals.filter(d =>
-    d.name.toLowerCase().includes(search.toLowerCase()) ||
-    d.company.toLowerCase().includes(search.toLowerCase())
+    (d.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (d.company || "").toLowerCase().includes(search.toLowerCase())
   );
 
-  const totalValue = deals.filter(d => d.stage !== "lost").reduce((s, d) => s + d.value, 0);
-  const wonValue   = deals.filter(d => d.stage === "won").reduce((s, d) => s + d.value, 0);
+  const totalValue  = deals.filter(d => d.stage !== "lost").reduce((s, d) => s + (d.value || 0), 0);
+  const wonValue    = deals.filter(d => d.stage === "won").reduce((s, d) => s + (d.value || 0), 0);
   const activeCount = deals.filter(d => !["won","lost"].includes(d.stage)).length;
 
   return (
@@ -3618,7 +3748,7 @@ function CRMPage() {
               <FileText size={14} /> List
             </button>
           </div>
-          <button className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
             <Plus size={14} /> Add Deal
           </button>
         </div>
@@ -3720,6 +3850,12 @@ function CRMPage() {
           onClose={() => setSelectedDeal(null)}
           onUpdate={updateDeal}
         />
+      )}
+      {showAddModal && <AddDealModal onClose={() => setShowAddModal(false)} onAdd={addDeal} />}
+      {loading && deals.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">
+          <RefreshCw size={16} className="animate-spin mr-2" /> Loading deals…
+        </div>
       )}
     </div>
   );
@@ -4051,25 +4187,75 @@ function ContactDrawer({ contact, onClose, onUpdate }) {
 }
 
 // ─── Contacts Page ────────────────────────────────────────────────────────────
+function AddContactModal({ onClose, onAdd }) {
+  const [form, setForm] = useState({ name: "", title: "", company: "", email: "", phone: "", linkedin: "", location: "", status: "prospect" });
+  const [loading, setLoading] = useState(false);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name) return;
+    setLoading(true);
+    await onAdd(form);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+          <h2 className="font-bold text-slate-900">Add Contact</h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-3">
+          {[["Full name *", "name", "text"], ["Title", "title", "text"], ["Company", "company", "text"], ["Email", "email", "email"], ["Phone", "phone", "tel"], ["LinkedIn URL", "linkedin", "url"], ["Location", "location", "text"]].map(([label, key, type]) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+              <input type={type} value={form[key]} onChange={e => set(key, e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          ))}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Status</label>
+            <select value={form.status} onChange={e => set("status", e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {["prospect","customer","cold","lost"].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50">Cancel</button>
+            <button type="submit" disabled={loading || !form.name}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
+              {loading ? <RefreshCw size={14} className="animate-spin" /> : <Plus size={14} />} Add Contact
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function ContactsPage() {
-  const [contactList, setContactList] = useState(contacts);
+  const user = useUser();
+  const { contacts: contactList, loading, addContact, updateContact: updateContactDb, deleteContact } = useContacts(user?.email);
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [viewMode, setViewMode] = useState("table"); // "table" | "cards"
+  const [viewMode, setViewMode] = useState("table");
+  const [showAddModal, setShowAddModal] = useState(false);
 
-  const updateContact = (updated) => setContactList(prev => prev.map(c => c.id === updated.id ? updated : c));
+  const updateContact = (updated) => updateContactDb(updated.id, updated);
 
   const filtered = contactList.filter(c => {
     const q = search.toLowerCase();
-    const matchSearch = c.name.toLowerCase().includes(q) || c.company.toLowerCase().includes(q) || c.title.toLowerCase().includes(q);
+    const matchSearch = (c.name || "").toLowerCase().includes(q) || (c.company || "").toLowerCase().includes(q) || (c.title || "").toLowerCase().includes(q);
     const matchStatus = statusFilter === "all" || c.status === statusFilter;
     return matchSearch && matchStatus;
   });
 
-  const totalOutreach = contactList.reduce((s, c) => s + c.outreach.length, 0);
-  const withReply = contactList.filter(c => c.outreach.some(o => o.type === "message" && o.text.includes("Replied"))).length;
-  const openTasks = contactList.reduce((s, c) => s + c.tasks.filter(t => !t.done).length, 0);
+  const totalOutreach = 0;
+  const withReply     = 0;
+  const openTasks     = 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -4104,7 +4290,7 @@ function ContactsPage() {
             <button onClick={() => setViewMode("table")} className={`px-3 py-2 text-sm ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}><FileText size={14} /></button>
             <button onClick={() => setViewMode("cards")} className={`px-3 py-2 text-sm ${viewMode === "cards" ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}><Layers size={14} /></button>
           </div>
-          <button className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
             <Plus size={14} /> Add Contact
           </button>
         </div>
@@ -4240,6 +4426,14 @@ function ContactsPage() {
           onClose={() => setSelected(null)}
           onUpdate={updateContact}
         />
+      )}
+      {showAddModal && <AddContactModal onClose={() => setShowAddModal(false)} onAdd={addContact} />}
+      {!loading && contactList.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+          <UsersRound size={36} className="mb-3 opacity-30" />
+          <p className="font-medium">No contacts yet</p>
+          <p className="text-sm mt-1">Click "Add Contact" to get started</p>
+        </div>
       )}
     </div>
   );
@@ -4609,19 +4803,21 @@ function AppInner() {
   const current = pages[page];
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <Sidebar
-        current={page} onChange={setPage}
-        collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed}
-        user={user} onLogout={handleLogout}
-      />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Topbar title={current.title} subtitle={current.subtitle} />
-        <div className="flex-1 overflow-y-auto">
-          {current.component}
+    <UserContext.Provider value={user}>
+      <div className="flex min-h-screen bg-slate-50">
+        <Sidebar
+          current={page} onChange={setPage}
+          collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed}
+          user={user} onLogout={handleLogout}
+        />
+        <div className="flex-1 flex flex-col min-w-0">
+          <Topbar title={current.title} subtitle={current.subtitle} />
+          <div className="flex-1 overflow-y-auto">
+            {current.component}
+          </div>
         </div>
       </div>
-    </div>
+    </UserContext.Provider>
   );
 }
 
