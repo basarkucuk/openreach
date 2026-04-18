@@ -686,7 +686,283 @@ const navItems = [
   { id: "settings",   label: "Settings",   icon: Settings },
 ];
 
-function Sidebar({ current, onChange, collapsed, setCollapsed }) {
+// ─── Auth Helpers ────────────────────────────────────────────────────────────
+
+const AUTH_KEY = "openreach_auth";
+
+function saveSession(user) {
+  localStorage.setItem(AUTH_KEY, JSON.stringify(user));
+}
+function loadSession() {
+  try { return JSON.parse(localStorage.getItem(AUTH_KEY)); } catch { return null; }
+}
+function clearSession() {
+  localStorage.removeItem(AUTH_KEY);
+}
+
+// ─── Login Page ──────────────────────────────────────────────────────────────
+
+function LoginPage({ onLogin, onGoSignup, onGoForgot }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!email || !password) { setError("Please fill in all fields."); return; }
+    setLoading(true);
+    setTimeout(() => {
+      const stored = JSON.parse(localStorage.getItem("openreach_users") || "[]");
+      const user = stored.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+      if (user) {
+        const session = { name: user.name, email: user.email, plan: "Pro", avatar: user.name[0].toUpperCase() };
+        saveSession(session);
+        onLogin(session);
+      } else {
+        setError("Invalid email or password.");
+        setLoading(false);
+      }
+    }, 700);
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="flex items-center justify-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
+            <Zap size={20} className="text-white" />
+          </div>
+          <span className="text-2xl font-bold text-white tracking-tight">OpenReach</span>
+        </div>
+
+        {/* Card */}
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <h2 className="text-2xl font-bold text-slate-900 mb-1">Welcome back</h2>
+          <p className="text-slate-500 text-sm mb-6">Sign in to your account</p>
+
+          {error && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 rounded-lg px-4 py-3 mb-5 text-sm">
+              <AlertCircle size={15} /> {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+              <input
+                type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="you@company.com" autoFocus
+                className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-slate-700">Password</label>
+                <button type="button" onClick={onGoForgot} className="text-xs text-blue-600 hover:underline">Forgot password?</button>
+              </div>
+              <div className="relative">
+                <input
+                  type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10"
+                />
+                <button type="button" onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <Eye size={15} />
+                </button>
+              </div>
+            </div>
+            <button type="submit" disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+              {loading ? <><RefreshCw size={15} className="animate-spin" /> Signing in…</> : "Sign in"}
+            </button>
+          </form>
+
+          <p className="text-center text-sm text-slate-500 mt-6">
+            Don't have an account?{" "}
+            <button onClick={onGoSignup} className="text-blue-600 font-medium hover:underline">Create one free</button>
+          </p>
+        </div>
+
+        <p className="text-center text-xs text-slate-500 mt-6">
+          © {new Date().getFullYear()} OpenReach · <a href="#" className="hover:underline">Privacy</a> · <a href="#" className="hover:underline">Terms</a>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Signup Page ─────────────────────────────────────────────────────────────
+
+function SignupPage({ onLogin, onGoLogin }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (!name || !email || !password || !confirm) { setError("Please fill in all fields."); return; }
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    if (password !== confirm) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    setTimeout(() => {
+      const stored = JSON.parse(localStorage.getItem("openreach_users") || "[]");
+      if (stored.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+        setError("An account with this email already exists.");
+        setLoading(false);
+        return;
+      }
+      stored.push({ name, email, password });
+      localStorage.setItem("openreach_users", JSON.stringify(stored));
+      const session = { name, email, plan: "Pro Trial", avatar: name[0].toUpperCase() };
+      saveSession(session);
+      onLogin(session);
+    }, 700);
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="flex items-center justify-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
+            <Zap size={20} className="text-white" />
+          </div>
+          <span className="text-2xl font-bold text-white tracking-tight">OpenReach</span>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          <h2 className="text-2xl font-bold text-slate-900 mb-1">Create your account</h2>
+          <p className="text-slate-500 text-sm mb-6">Start your free trial — no credit card required</p>
+
+          {error && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-600 rounded-lg px-4 py-3 mb-5 text-sm">
+              <AlertCircle size={15} /> {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Full name</label>
+              <input type="text" value={name} onChange={e => setName(e.target.value)}
+                placeholder="Basar Kucuk" autoFocus
+                className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Work email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+              <div className="relative">
+                <input type={showPass ? "text" : "password"} value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="Min. 8 characters"
+                  className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent pr-10" />
+                <button type="button" onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <Eye size={15} />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Confirm password</label>
+              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+                placeholder="••••••••"
+                className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+            </div>
+            <button type="submit" disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+              {loading ? <><RefreshCw size={15} className="animate-spin" /> Creating account…</> : "Create free account"}
+            </button>
+          </form>
+
+          <p className="text-center text-xs text-slate-400 mt-4">
+            By signing up you agree to our <a href="#" className="underline">Terms</a> and <a href="#" className="underline">Privacy Policy</a>.
+          </p>
+          <p className="text-center text-sm text-slate-500 mt-3">
+            Already have an account?{" "}
+            <button onClick={onGoLogin} className="text-blue-600 font-medium hover:underline">Sign in</button>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Forgot Password Page ─────────────────────────────────────────────────────
+
+function ForgotPasswordPage({ onGoLogin }) {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!email) return;
+    setLoading(true);
+    setTimeout(() => { setSent(true); setLoading(false); }, 800);
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="flex items-center justify-center gap-3 mb-8">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
+            <Zap size={20} className="text-white" />
+          </div>
+          <span className="text-2xl font-bold text-white tracking-tight">OpenReach</span>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
+          {sent ? (
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle size={28} className="text-green-500" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 mb-2">Check your inbox</h2>
+              <p className="text-slate-500 text-sm mb-6">We sent a reset link to <strong>{email}</strong>. Check your spam folder if you don't see it.</p>
+              <button onClick={onGoLogin} className="text-blue-600 font-medium hover:underline text-sm">← Back to sign in</button>
+            </div>
+          ) : (
+            <>
+              <h2 className="text-2xl font-bold text-slate-900 mb-1">Reset password</h2>
+              <p className="text-slate-500 text-sm mb-6">Enter your email and we'll send you a reset link.</p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                  <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                    placeholder="you@company.com" autoFocus
+                    className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                </div>
+                <button type="submit" disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center gap-2">
+                  {loading ? <><RefreshCw size={15} className="animate-spin" /> Sending…</> : "Send reset link"}
+                </button>
+              </form>
+              <p className="text-center mt-4">
+                <button onClick={onGoLogin} className="text-sm text-blue-600 hover:underline">← Back to sign in</button>
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Sidebar({ current, onChange, collapsed, setCollapsed, user, onLogout }) {
   return (
     <div className={`flex flex-col bg-slate-900 text-white transition-all duration-200 ${collapsed ? "w-16" : "w-60"} min-h-screen flex-shrink-0`}>
       {/* Logo */}
@@ -724,14 +1000,21 @@ function Sidebar({ current, onChange, collapsed, setCollapsed }) {
       {/* User */}
       <div className="p-3 border-t border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-xs font-bold flex-shrink-0">B</div>
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-xs font-bold flex-shrink-0">
+            {user?.avatar || "?"}
+          </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">Basar K.</p>
-              <p className="text-xs text-slate-400 truncate">Pro Plan</p>
+              <p className="text-sm font-medium truncate">{user?.name || "User"}</p>
+              <p className="text-xs text-slate-400 truncate">{user?.plan || "Free"}</p>
             </div>
           )}
-          {!collapsed && <LogOut size={15} className="text-slate-400 hover:text-white cursor-pointer flex-shrink-0" />}
+          {!collapsed && (
+            <button onClick={onLogout} title="Sign out"
+              className="text-slate-400 hover:text-white cursor-pointer flex-shrink-0 transition-colors">
+              <LogOut size={15} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -4203,25 +4486,56 @@ function CompaniesPage() {
 export default function App() {
   const [page, setPage] = useState("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [authScreen, setAuthScreen] = useState("login"); // "login" | "signup" | "forgot"
+  const [user, setUser] = useState(() => loadSession());
 
+  function handleLogin(session) {
+    setUser(session);
+    setAuthScreen("login");
+  }
+
+  function handleLogout() {
+    clearSession();
+    setUser(null);
+    setAuthScreen("login");
+  }
+
+  // ── Not authenticated — show auth screens ─────────────────────────────────
+  if (!user) {
+    if (authScreen === "signup")  return <SignupPage onLogin={handleLogin} onGoLogin={() => setAuthScreen("login")} />;
+    if (authScreen === "forgot")  return <ForgotPasswordPage onGoLogin={() => setAuthScreen("login")} />;
+    return (
+      <LoginPage
+        onLogin={handleLogin}
+        onGoSignup={() => setAuthScreen("signup")}
+        onGoForgot={() => setAuthScreen("forgot")}
+      />
+    );
+  }
+
+  // ── Authenticated — show the app ──────────────────────────────────────────
   const pages = {
-    dashboard: { title: "Dashboard",  subtitle: "Welcome back, Basar 👋",             component: <Dashboard /> },
-    campaigns: { title: "Campaigns",  subtitle: "Manage your outreach sequences",      component: <CampaignsPage /> },
-    leads:     { title: "Leads",      subtitle: "Your LinkedIn prospects",             component: <LeadsPage /> },
-    contacts:  { title: "Contacts",   subtitle: "All people you're in touch with",     component: <ContactsPage /> },
-    companies: { title: "Companies",  subtitle: "Organisations in your network",       component: <CompaniesPage /> },
-    crm:       { title: "CRM",        subtitle: "Pipeline & deal management",          component: <CRMPage /> },
-    inbox:     { title: "Inbox",      subtitle: "LinkedIn & Gmail messages",           component: <InboxPage /> },
-    calendar:  { title: "Calendar",   subtitle: "Google Calendar — meetings & events", component: <CalendarPage /> },
-    analytics: { title: "Analytics",  subtitle: "Performance insights",               component: <AnalyticsPage /> },
-    settings:  { title: "Settings",   subtitle: "Account & preferences",              component: <SettingsPage /> },
+    dashboard: { title: "Dashboard",  subtitle: `Welcome back, ${user.name.split(" ")[0]} 👋`,  component: <Dashboard /> },
+    campaigns: { title: "Campaigns",  subtitle: "Manage your outreach sequences",               component: <CampaignsPage /> },
+    leads:     { title: "Leads",      subtitle: "Your LinkedIn prospects",                       component: <LeadsPage /> },
+    contacts:  { title: "Contacts",   subtitle: "All people you're in touch with",               component: <ContactsPage /> },
+    companies: { title: "Companies",  subtitle: "Organisations in your network",                 component: <CompaniesPage /> },
+    crm:       { title: "CRM",        subtitle: "Pipeline & deal management",                    component: <CRMPage /> },
+    inbox:     { title: "Inbox",      subtitle: "LinkedIn & Gmail messages",                     component: <InboxPage /> },
+    calendar:  { title: "Calendar",   subtitle: "Google Calendar — meetings & events",           component: <CalendarPage /> },
+    analytics: { title: "Analytics",  subtitle: "Performance insights",                         component: <AnalyticsPage /> },
+    settings:  { title: "Settings",   subtitle: "Account & preferences",                        component: <SettingsPage /> },
   };
 
   const current = pages[page];
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar current={page} onChange={setPage} collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed} />
+      <Sidebar
+        current={page} onChange={setPage}
+        collapsed={sidebarCollapsed} setCollapsed={setSidebarCollapsed}
+        user={user} onLogout={handleLogout}
+      />
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar title={current.title} subtitle={current.subtitle} />
         <div className="flex-1 overflow-y-auto">
