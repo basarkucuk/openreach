@@ -2546,8 +2546,8 @@ function LeadsPage() {
           <p className="text-sm mt-1">Click "Add Lead" to get started</p>
         </div>
       )}
+      {showAddModal && <AddLeadModal onClose={() => setShowAddModal(false)} onAdd={addLead} />}
     </div>
-    {showAddModal && <AddLeadModal onClose={() => setShowAddModal(false)} onAdd={addLead} />}
   );
 }
 
